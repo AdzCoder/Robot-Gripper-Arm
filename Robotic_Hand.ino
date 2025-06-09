@@ -1,289 +1,458 @@
-/*
-  File type: Arduino Sketch file
-  Author: Adil Wahab Bhatti
-  Board: Arduino Uno
-  Function: Utilise sensor measurements to control and operate DC motors
-  Version: 3.1 (Final)
-  Date: 21/11/2023
-*/
+/**
+ * @file gripper_control_system.ino
+ * @brief Sensor-controlled DC motor gripper system with PID control
+ * @author Adil Wahab Bhatti
+ * @version 3.1
+ * @date 2023-11-21
+ * 
+ * @description
+ * This Arduino sketch implements a sophisticated gripper control system that uses
+ * multiple sensors (ultrasonic, current, force) and a joystick for precise motor
+ * control with PID feedback. The system automatically grips objects when detected
+ * and provides manual control through a joystick interface.
+ * 
+ * @hardware
+ * - Arduino Uno
+ * - INA219 Current Sensor
+ * - Ultrasonic Sensor (HC-SR04)
+ * - Force Sensor (FSR)
+ * - Servo Motor
+ * - DC Motor with Driver
+ * - Joystick Module (KY-023)
+ * 
+ * @dependencies
+ * - Adafruit_INA219 Library v1.2.3+
+ * - movingAvg Library v2.3.1+
+ * - Servo Library (built-in)
+ */
 
-// Moving Averages - Library
-  #include <movingAvg.h> // Arduino Moving Average Library (v2.3.1)
-    // https://github.com/JChristensen/movingAvg
-    // Copyright (C) 2018 by Jack Christensen and licensed under
-    // GNU GPL v3.0, https://www.gnu.org/licenses/gpl.html
+#include <Adafruit_INA219.h>
+#include <movingAvg.h>
+#include <Servo.h>
 
-// Current Sensor (INA219)- Library, Objects, Constant, and Variables
-  #include <Adafruit_INA219.h> // Adafruit INA219 Library (v1.2.3)
-    // https://github.com/adafruit/Adafruit_INA219
-    // Written by Bryan Siepert and Kevin "KTOWN" Townsend for Adafruit Industries
-    // BSD license
+// ============================================================================
+// CONFIGURATION & CONSTANTS
+// ============================================================================
 
-  Adafruit_INA219 ina219;
-  movingAvg currentArray(35); // array to hold last 35 values of current readings
+// Debug Configuration
+const bool DEBUG_ENABLED = true;
 
-  float current; // current read from the sensor
-  float avgCurrent; // average current calculated from range
-
-// Servo Motor - Library, Object, Constants, and Variable
-  #include <Servo.h> // Interrupt driven Servo library for Arduino using 16 bit timers (v2)
-    // Copyright (c) 2009 Michael Margolis.  All right reserved.
-
-  Servo servoRoll; // servo controller
-
-  const int servoPin = 11; // digital pin 11 will be used for PWM servo output
-  const int minAngle = 0; // angle cannot go below 0
-  const int maxAngle = 180; // angle cannot exceed 180
-  float angle = 90; // servo starting position set to 90
-
-// Motordriver - Constants and Variable
-  const int pwmPin = 3; // digital pin 3 will be used for PWM motor driver output
-  const int dirPin = 8; // digital pin 8 will be used for directional output
-
-  int motorSpeed = 70; // motor speed set to 70
-  int gripMode = 0; // mode of the gripper
-    // 0 = off
-    // 1 = tighting
-    // 2 = tightened
-    // -1 = loosening
-    // -2 = loosened
- 
-// Force sensor - Object, Constant and Variables
-  movingAvg forceArray(20); // array to hold last 20 values of force readings
-
-  const int forcePin = A0; // analogue pin A0 will be used for force sensor input
-  int force; // value read from force pin; 0 to 1023
-  int avgForce; // average force calculayed from range
-
-// Ultrasonic Sensor - Object, Constants, Variable and Function
-  movingAvg distArray(100); // array to hold last 100 values of distance readings
-
-  const int trigPin = 6; // digital pin 6 will be used for transmitter output
-  const int echoPin = 5; // digital pin 5 will be used for receiver input
-  float dist; // distance calculated from the sensor
-  float avgDist; // average current calculated from range
-
-  float readDistance(int trigPin, int echoPin) { // reads the distance using the ultrasonic sensor
-    // Set the trig pin to LOW 
-    digitalWrite(trigPin, LOW);
-    delayMicroseconds(2);
-
-    // Sets the trigPin to HIGH state for 10 micro seconds
-    digitalWrite(trigPin, HIGH);
-    delayMicroseconds(10);
-    digitalWrite(trigPin, LOW);
-
-    long duration = pulseIn(echoPin, HIGH); // reads the echoPin, returns the sound wave travel time in microseconds
-    float distance = duration * 0.034 / 2; // calculate the distance
-    return distance; // return the distance
-  }
-
-// Joystick Module (Module KY023) - Constants, Variables, and Function
-  const int xPin = A2; // analogue pin A2 will be used for X input
-  const int yPin = A1; // analogue pin A1 will be used for y input
-  const int bPin = 4; // digital pin 4 will be used for push button input
-  float xVal, yVal; // voltage ratios read from x and y pins; -1 to 1
-  int bVal; // voltage read from button pin
-  bool running = false; // true when running, false when not running
-
-  float getJoystickRatio(int pin) { // reads voltage from joystick pin and converts to a ratio
-    float val = analogRead(pin); // voltage read from x and y pins; 0 to 1023
-    float ratio = (val*2/1023) - 1; // convert voltage to ratio
-    // float ratio = map(val, 0, 1023, -1000, 1000) / 1000
-    return ratio; // return the ratio
-  }
-
-// Serial for debugging - Constant
-  const bool debug = true; // set to true when debugging
-
-// Proportional–integral–derivative controller - Constants and Variables 
-  // Define PID parameters
-  const double Kp = 0.02; // Proportional gain
-  const double Ki = 0.00; // Integral gain
-  const double Kd = 0.000000; // Derivative gain
-  double P, I, D, PID;
-
-  // Time Variables
-  unsigned long t = 0, prevT = 0; // time stamps in microseconds
-  float dt = 0; // elapsed time between loops in ms
-  float looseT; // elapsed time while loosening in ms
-
-  // Define setpoint and initial parameters
-  const int minOutput = 0; // output cannot go below 0
-  const int maxOutput = 255; // output cannot exceed 255
-  double output, error, prevError;
-  float setPoint = 130; // Setpoint is set to 200
-
-// Initialisation
-  void setup() {
-    // initialising the current sensor
-    bool inaCheck = ina219.begin(); // store output for debugging
-    currentArray.begin(); // setup the current array 
+// Pin Definitions
+namespace Pins {
+  // Servo
+  const int SERVO = 11;
   
-    // initialising the servo motor
-    bool servoCheck = servoRoll.attach(servoPin); // store output for debugging
-    while (servoRoll.read() != angle) { // wait for servo to set to starting angle
-      servoRoll.write(angle); // set servo to starting angle
-    }
-    
-    // initialising the motor driver
-    pinMode(pwmPin,OUTPUT);  // we have to set PWM pin as output
-    pinMode(dirPin,OUTPUT);  // Direction pin pins are also set as output
-    
-    // initialising the force sensor
-    pinMode(forcePin, INPUT); // sets the force pin as an input 
-    forceArray.begin(); // setup the force array
-
-    // initialising the ultrasonic sensor
-    pinMode(trigPin, OUTPUT); // sets the trigPin as an output  
-    pinMode(echoPin, INPUT); // sets the echoPin as an input
-    distArray.begin(); // setup the distance array
-
-    // initialising the joystick button
-    pinMode(xPin, INPUT); // sets the xPin as an input  
-    pinMode(yPin, INPUT); // sets the yPin as an output 
-    pinMode(bPin, INPUT_PULLUP); // enable the internal pull-up resistor
-
-    // setup board led
-    digitalWrite(LED_BUILTIN, LOW);  // turn the LED off
-
-    // setup debugger
-    if (debug) { // if debugger turned on
-      Serial.begin(9600); // setup serial communication for debug
-      while (!Serial) { // wait for serial comunication to open
-        delay(1); // will pause the Uno Microcontroller until serial console opens
-      } 
-      
-      if (!inaCheck) { // if fails to initialize the INA219 chip
-        Serial.println("Failed to connect to INA219 chip");
-      }
-
-      if (!servoCheck) { // if fails to initialize the servo motor
-        Serial.println("Failed to connect to servo motor");
-      }
-    }
-  }
-
-// Runtime
-  void loop() {
-    // Code for reading sensors
-    current = ina219.getCurrent_mA(); // gets current in mA from current sensor
-    if (current); { // if current reading is not zero
-      avgCurrent = currentArray.reading(current); // adds new reading to array and stores the new average
-    }
-    
-    dist = readDistance(trigPin, echoPin); // read distance using the ultrasonic sensor
-    if (dist); { // if distance reading is not zero
-      avgDist = distArray.reading(dist); // adds new reading to array and stores the new average
-    }
+  // Motor Driver
+  const int MOTOR_PWM = 3;
+  const int MOTOR_DIR = 8;
   
-    force = analogRead(forcePin); // read voltage from output of force sensor
-    avgForce = forceArray.reading(force); // adds new reading to array and stores the new average
+  // Sensors
+  const int FORCE_SENSOR = A0;
+  const int ULTRASONIC_TRIG = 6;
+  const int ULTRASONIC_ECHO = 5;
+  
+  // Joystick
+  const int JOYSTICK_X = A2;
+  const int JOYSTICK_Y = A1;
+  const int JOYSTICK_BUTTON = 4;
+}
 
-    xVal = getJoystickRatio(xPin); // reads ratio from joystick in x-axis
-    yVal = getJoystickRatio(yPin); // reads ratio from joystick in y-axis
-    bVal = digitalRead(bPin); // reads the voltage from push button
+// System Limits & Thresholds
+namespace Limits {
+  const int SERVO_MIN_ANGLE = 0;
+  const int SERVO_MAX_ANGLE = 180;
+  const int SERVO_START_ANGLE = 90;
+  
+  const int MOTOR_SPEED = 70;
+  const int PWM_MIN = 0;
+  const int PWM_MAX = 255;
+  
+  const float GRIP_DISTANCE_THRESHOLD = 12.0;  // cm
+  const float JOYSTICK_DEADZONE = 0.07;        // 7%
+  const float JOYSTICK_GRIP_THRESHOLD = 0.3;   // 30%
+  const float LOOSENING_TIMEOUT = 9000.0;      // ms
+}
 
-    // Update elapsed time
-    prevT = t; // save the previous time stamp
-    t = micros(); // read the current time stamp
-    dt = (t - prevT) / 1000; // calculate difference and convert microseconds to milliseconds
+// PID Controller Parameters
+namespace PID {
+  const double KP = 0.02;
+  const double KI = 0.00;
+  const double KD = 0.000000;
+  const float SETPOINT = 130.0;
+}
 
-    // Update error values
-    prevError = error;
-    error = setPoint - avgCurrent;
+// Moving Average Buffer Sizes
+namespace BufferSizes {
+  const int CURRENT = 35;
+  const int FORCE = 20;
+  const int DISTANCE = 100;
+}
 
-    // Calculate P, I, D terms
-    P = Kp * error;
-    I += Ki * error * dt;
-    D = Kd * (error - prevError) / dt;
-    PID = P + I + D;
+// ============================================================================
+// GRIPPER STATES
+// ============================================================================
 
-    // Code for switching the program on or off
-    if (bVal == LOW) { // if button is pressed
-      running = !running; // flip state of the program
-      // digitalWrite(LED_BUILTIN, false); // flip the state of the led
-      do { bVal = digitalRead(bPin); // reads the voltage from push button
-      } while (bVal == LOW); // hold program until button released
-      delay(50); // delay in milliseconds
+enum class GripperMode {
+  OFF = 0,
+  TIGHTENING = 1,
+  TIGHTENED = 2,
+  LOOSENING = -1,
+  LOOSENED = -2
+};
+
+// ============================================================================
+// GLOBAL OBJECTS & VARIABLES
+// ============================================================================
+
+// Hardware Objects
+Adafruit_INA219 currentSensor;
+Servo servoMotor;
+
+// Moving Average Filters
+movingAvg currentFilter(BufferSizes::CURRENT);
+movingAvg forceFilter(BufferSizes::FORCE);
+movingAvg distanceFilter(BufferSizes::DISTANCE);
+
+// Sensor Data
+struct SensorData {
+  float current = 0.0;
+  float avgCurrent = 0.0;
+  float distance = 0.0;
+  float avgDistance = 0.0;
+  int force = 0;
+  int avgForce = 0;
+  float joystickX = 0.0;
+  float joystickY = 0.0;
+  bool buttonPressed = false;
+};
+
+// System State
+struct SystemState {
+  bool running = false;
+  GripperMode gripperMode = GripperMode::OFF;
+  float servoAngle = Limits::SERVO_START_ANGLE;
+  
+  // PID Variables
+  double pidOutput = 0.0;
+  double error = 0.0;
+  double prevError = 0.0;
+  double integral = 0.0;
+  
+  // Timing
+  unsigned long currentTime = 0;
+  unsigned long prevTime = 0;
+  float deltaTime = 0.0;
+  float looseningTime = 0.0;
+};
+
+SensorData sensors;
+SystemState state;
+
+// ============================================================================
+// UTILITY FUNCTIONS
+// ============================================================================
+
+/**
+ * @brief Read distance from ultrasonic sensor
+ * @param trigPin Trigger pin
+ * @param echoPin Echo pin
+ * @return Distance in centimeters
+ */
+float readUltrasonicDistance(int trigPin, int echoPin) {
+  digitalWrite(trigPin, LOW);
+  delayMicroseconds(2);
+  
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trigPin, LOW);
+  
+  long duration = pulseIn(echoPin, HIGH);
+  return (duration * 0.034) / 2.0;
+}
+
+/**
+ * @brief Convert joystick analog reading to normalized ratio
+ * @param pin Analog pin to read
+ * @return Normalized value between -1.0 and 1.0
+ */
+float getJoystickRatio(int pin) {
+  float rawValue = analogRead(pin);
+  return (rawValue * 2.0 / 1023.0) - 1.0;
+}
+
+/**
+ * @brief Update all sensor readings
+ */
+void updateSensors() {
+  // Current sensor
+  sensors.current = currentSensor.getCurrent_mA();
+  if (sensors.current != 0) {
+    sensors.avgCurrent = currentFilter.reading(sensors.current);
+  }
+  
+  // Distance sensor
+  sensors.distance = readUltrasonicDistance(Pins::ULTRASONIC_TRIG, Pins::ULTRASONIC_ECHO);
+  if (sensors.distance != 0) {
+    sensors.avgDistance = distanceFilter.reading(sensors.distance);
+  }
+  
+  // Force sensor
+  sensors.force = analogRead(Pins::FORCE_SENSOR);
+  sensors.avgForce = forceFilter.reading(sensors.force);
+  
+  // Joystick
+  sensors.joystickX = getJoystickRatio(Pins::JOYSTICK_X);
+  sensors.joystickY = getJoystickRatio(Pins::JOYSTICK_Y);
+  sensors.buttonPressed = (digitalRead(Pins::JOYSTICK_BUTTON) == LOW);
+}
+
+/**
+ * @brief Update timing variables
+ */
+void updateTiming() {
+  state.prevTime = state.currentTime;
+  state.currentTime = micros();
+  state.deltaTime = (state.currentTime - state.prevTime) / 1000.0; // Convert to ms
+}
+
+/**
+ * @brief Calculate PID output
+ */
+void calculatePID() {
+  state.prevError = state.error;
+  state.error = PID::SETPOINT - sensors.avgCurrent;
+  
+  double proportional = PID::KP * state.error;
+  state.integral += PID::KI * state.error * state.deltaTime;
+  double derivative = PID::KD * (state.error - state.prevError) / state.deltaTime;
+  
+  double pidValue = proportional + state.integral + derivative;
+  state.pidOutput += pidValue;
+  state.pidOutput = constrain(state.pidOutput, Limits::PWM_MIN, Limits::PWM_MAX);
+}
+
+// ============================================================================
+// MOTOR CONTROL FUNCTIONS
+// ============================================================================
+
+/**
+ * @brief Stop the gripper motor
+ */
+void stopGripper() {
+  analogWrite(Pins::MOTOR_PWM, 0);
+}
+
+/**
+ * @brief Start gripper tightening sequence
+ */
+void startTightening() {
+  stopGripper();
+  delay(25);
+  
+  state.gripperMode = GripperMode::TIGHTENING;
+  digitalWrite(Pins::MOTOR_DIR, HIGH); // Set direction to tighten
+  
+  // Gradual start
+  analogWrite(Pins::MOTOR_PWM, Limits::MOTOR_SPEED * 0.5);
+  delay(25);
+  analogWrite(Pins::MOTOR_PWM, Limits::MOTOR_SPEED);
+  delay(25);
+  
+  // Reset PID
+  state.integral = 0;
+  state.pidOutput = Limits::MOTOR_SPEED;
+}
+
+/**
+ * @brief Start gripper loosening sequence
+ */
+void startLoosening() {
+  stopGripper();
+  delay(25);
+  
+  state.gripperMode = GripperMode::LOOSENING;
+  digitalWrite(Pins::MOTOR_DIR, LOW); // Set direction to loosen
+  
+  // Gradual start
+  analogWrite(Pins::MOTOR_PWM, Limits::MOTOR_SPEED * 0.5);
+  delay(25);
+  analogWrite(Pins::MOTOR_PWM, Limits::MOTOR_SPEED);
+  
+  state.looseningTime = 0;
+}
+
+/**
+ * @brief Control gripper based on sensor inputs
+ */
+void controlGripper() {
+  bool objectInRange = (sensors.avgDistance < Limits::GRIP_DISTANCE_THRESHOLD) && 
+                      (abs(sensors.joystickX) < Limits::JOYSTICK_GRIP_THRESHOLD);
+  
+  if (objectInRange) {
+    if (state.gripperMode != GripperMode::TIGHTENING) {
+      startTightening();
+    } else {
+      // Continue PID control
+      calculatePID();
+      analogWrite(Pins::MOTOR_PWM, state.pidOutput);
+      delay(10);
     }
-
-    // Main Section
-    if (running) { // if program turned on
-      // Code for controlling the gripper
-      if (dist < 12 && abs(xVal) < 0.3) { // if the object is within 5cm from sensor and joystick is not pulled back more than 30%
-        if (gripMode != 1) { // if gripper not already tighting   
-          // Pause gripper
-          analogWrite(pwmPin, 0);
-          delay(25); // delay in milliseconds
-          
-          // Set gripper to tighten
-          gripMode = 1; // set mode to tightening
-          digitalWrite(dirPin, HIGH); // set direction to tight
-
-          // Begin tightening gripper
-          analogWrite(pwmPin, motorSpeed*0.5); // turn motor on half speed
-          delay(25); // delay in milliseconds
-          analogWrite(pwmPin, motorSpeed); // turn motor on full speed
-          delay(25); // delay in milliseconds
-
-          // Reset integral and output for PID
-          I = 0;
-          output = motorSpeed;
-        
-        } else { // if gripper has started to grip
-          output += PID; // incremental PID calculation
-          output = constrain(output, minOutput, maxOutput); // keep output within range
-          analogWrite(pwmPin, output); // turn motor with PID output
-          delay(10); // delay in milliseconds
-        }
-
-      } else if (gripMode != -2) { // if there is no object within the grips and gripper not already loosened
-        if (gripMode != -1) {
-          // Pause gripper
-          analogWrite(pwmPin,0);
-          delay(25); // delay in milliseconds
-          
-          // Set gripper to loose
-          gripMode = -1; // set mode to loosening
-          digitalWrite(dirPin, LOW); // set direction to loose
-
-          // Begin loosening gripper
-          analogWrite(pwmPin, motorSpeed*0.5); // turn motor on
-          delay(25); // delay in milliseconds
-          analogWrite(pwmPin, motorSpeed); // turn motor on 
-          
-          // Start tracking time of loosening
-          looseT = 0;
-
-        } else {
-          looseT += dt;
-          if (looseT > 9000) { // if gripper has been loosening for 9s
-            gripMode = -2; // set mode to loosened  
-            analogWrite(pwmPin, 0); // turn motor off
-            angle = 90; // revert angle of servo to starting position
-            servoRoll.write(angle); // set new angle
-          }
-        }        
+  } else if (state.gripperMode != GripperMode::LOOSENED) {
+    if (state.gripperMode != GripperMode::LOOSENING) {
+      startLoosening();
+    } else {
+      // Continue loosening with timeout
+      state.looseningTime += state.deltaTime;
+      if (state.looseningTime > Limits::LOOSENING_TIMEOUT) {
+        state.gripperMode = GripperMode::LOOSENED;
+        stopGripper();
+        state.servoAngle = Limits::SERVO_START_ANGLE;
+        servoMotor.write(state.servoAngle);
       }
-      
-      // Code to control the servo motor
-      if (abs(yVal) > 0.07) { // if joystick is deflected left or right by more than 7%
-        angle += (yVal*0.6); // add joystic deflection ratio * 0.5 to angle
-        angle = constrain(angle, minAngle, maxAngle); // keep angle within range
-        servoRoll.write(angle); // set new angle
-      }
-    } else if (gripMode) { // if program turned off and gripper not turned off
-      gripMode = 0; // set mode to off
-      analogWrite(pwmPin, 0); // turn motor off
-    }
-
-    // Debugger
-    if (debug) { // if debugger turned on
-      Serial.println(""); Serial.print(avgCurrent);
-      Serial.print(", "); Serial.print(setPoint);
-      Serial.print(", "); Serial.print(output);
-      // Serial.print(", "); Serial.print(force);
-      // delay(100);
     }
   }
+}
+
+/**
+ * @brief Control servo motor based on joystick input
+ */
+void controlServo() {
+  if (abs(sensors.joystickY) > Limits::JOYSTICK_DEADZONE) {
+    state.servoAngle += (sensors.joystickY * 0.6);
+    state.servoAngle = constrain(state.servoAngle, Limits::SERVO_MIN_ANGLE, Limits::SERVO_MAX_ANGLE);
+    servoMotor.write(state.servoAngle);
+  }
+}
+
+/**
+ * @brief Handle system on/off toggle
+ */
+void handleSystemToggle() {
+  static bool prevButtonState = false;
+  
+  if (sensors.buttonPressed && !prevButtonState) {
+    state.running = !state.running;
+    
+    // Wait for button release with debouncing
+    while (digitalRead(Pins::JOYSTICK_BUTTON) == LOW) {
+      delay(10);
+    }
+    delay(50); // Additional debounce delay
+  }
+  
+  prevButtonState = sensors.buttonPressed;
+  
+  // Turn off gripper if system is disabled
+  if (!state.running && state.gripperMode != GripperMode::OFF) {
+    state.gripperMode = GripperMode::OFF;
+    stopGripper();
+  }
+}
+
+// ============================================================================
+// DEBUG FUNCTIONS
+// ============================================================================
+
+/**
+ * @brief Print debug information to serial
+ */
+void printDebugInfo() {
+  if (!DEBUG_ENABLED) return;
+  
+  Serial.print("Current: "); Serial.print(sensors.avgCurrent);
+  Serial.print(" | Setpoint: "); Serial.print(PID::SETPOINT);
+  Serial.print(" | Output: "); Serial.print(state.pidOutput);
+  Serial.print(" | Distance: "); Serial.print(sensors.avgDistance);
+  Serial.print(" | Running: "); Serial.print(state.running ? "YES" : "NO");
+  Serial.print(" | Mode: "); Serial.println(static_cast<int>(state.gripperMode));
+}
+
+// ============================================================================
+// INITIALIZATION
+// ============================================================================
+
+void setup() {
+  // Initialize serial communication for debugging
+  if (DEBUG_ENABLED) {
+    Serial.begin(9600);
+    while (!Serial) {
+      delay(1);
+    }
+    Serial.println("=== Gripper Control System Initializing ===");
+  }
+  
+  // Initialize current sensor
+  if (!currentSensor.begin()) {
+    if (DEBUG_ENABLED) {
+      Serial.println("ERROR: Failed to initialize INA219 current sensor!");
+    }
+  } else if (DEBUG_ENABLED) {
+    Serial.println("✓ Current sensor initialized");
+  }
+  currentFilter.begin();
+  
+  // Initialize servo motor
+  if (!servoMotor.attach(Pins::SERVO)) {
+    if (DEBUG_ENABLED) {
+      Serial.println("ERROR: Failed to initialize servo motor!");
+    }
+  } else if (DEBUG_ENABLED) {
+    Serial.println("✓ Servo motor initialized");
+  }
+  
+  // Set servo to starting position
+  servoMotor.write(state.servoAngle);
+  while (servoMotor.read() != state.servoAngle) {
+    delay(10);
+  }
+  
+  // Initialize motor driver pins
+  pinMode(Pins::MOTOR_PWM, OUTPUT);
+  pinMode(Pins::MOTOR_DIR, OUTPUT);
+  
+  // Initialize sensor pins
+  pinMode(Pins::FORCE_SENSOR, INPUT);
+  forceFilter.begin();
+  
+  pinMode(Pins::ULTRASONIC_TRIG, OUTPUT);
+  pinMode(Pins::ULTRASONIC_ECHO, INPUT);
+  distanceFilter.begin();
+  
+  // Initialize joystick pins
+  pinMode(Pins::JOYSTICK_X, INPUT);
+  pinMode(Pins::JOYSTICK_Y, INPUT);
+  pinMode(Pins::JOYSTICK_BUTTON, INPUT_PULLUP);
+  
+  // Initialize built-in LED
+  pinMode(LED_BUILTIN, OUTPUT);
+  digitalWrite(LED_BUILTIN, LOW);
+  
+  if (DEBUG_ENABLED) {
+    Serial.println("=== System Ready ===");
+  }
+}
+
+// ============================================================================
+// MAIN LOOP
+// ============================================================================
+
+void loop() {
+  // Update all sensors and timing
+  updateSensors();
+  updateTiming();
+  
+  // Handle system toggle
+  handleSystemToggle();
+  
+  // Main control logic (only when system is running)
+  if (state.running) {
+    controlGripper();
+    controlServo();
+  }
+  
+  // Debug output
+  printDebugInfo();
+  
+  // Small delay to prevent overwhelming the system
+  delay(10);
+}
