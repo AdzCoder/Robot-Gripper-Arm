@@ -2,8 +2,8 @@
  * @file gripper_control_system.ino
  * @brief Sensor-controlled DC motor gripper system with PID control
  * @author Adil Wahab Bhatti
- * @version 3.1
- * @date 2023-11-21
+ * @version 3.2
+ * @date 2025-06-09
  * 
  * @description
  * This Arduino sketch implements a sophisticated gripper control system that uses
