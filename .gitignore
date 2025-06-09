@@ -1,0 +1,12 @@
+# Arduino IDE files
+*.hex
+*.elf
+*.bin
+*.o
+*.d
+*.dep
+*.cpp~
+
+# OS files
+.DS_Store
+Thumbs.db
