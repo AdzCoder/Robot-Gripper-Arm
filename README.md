@@ -1,7 +1,7 @@
 # Robot Gripper Arm Project
 
 ## Overview
-An electromechanical gripper arm designed to assist individuals with limited mobility in performing daily tasks. The device features autonomous gripping capabilities with minimal human interaction.
+An electromechanical gripper arm prototype designed to assist individuals with limited mobility in performing daily tasks. The device features autonomous and adaptive gripping capabilities using force and distance feedback, with an intuitive joystick interface and built-in safety mechanisms.
 
 ## Features
 - Autonomous grip control using force and distance sensors
