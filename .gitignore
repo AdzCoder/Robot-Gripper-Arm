@@ -1,12 +1,78 @@
-# Arduino IDE files
-*.hex
+# Arduino specific
 *.elf
 *.bin
-*.o
-*.d
-*.dep
-*.cpp~
+*.hex
+*.eep
+*.lss
+*.sym
+*.map
+*.tmp
+*.ino.bak
 
-# OS files
+# Build output directories
+build/
+*.build/
+*.build_results/
+
+# IDE and toolchain files
+.vscode/
+.idea/
+*.sublime-workspace
+*.sublime-project
+
+# PlatformIO files
+.pio/
+.pioenvs/
+.piolibdeps/
+
+# Dependency directories
+libraries/
+**/__pycache__/
+
+# macOS files
 .DS_Store
+._*
+
+# Windows files
 Thumbs.db
+Desktop.ini
+
+# Linux files
+*~
+
+# Debug files
+*.stackdump
+core
+core.*
+
+# Log files
+*.log
+*.tlog
+
+# Backup files
+*.bak
+*.swp
+*~
+
+# User-specific files
+*.userprefs
+
+# Visual Studio Code
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# IntelliJ
+*.iml
+*.ipr
+*.iws
+
+# Eclipse
+.project
+.cproject
+.settings/
+
+# NetBeans
+nbproject/
