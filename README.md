@@ -59,7 +59,7 @@ The device features autonomous and adaptive gripping capabilities using force an
 
 ## Project Team
 
-- J4  
+- Group J4  
 - University of Warwick, School of Engineering  
 - ES2C6 Electromechanical System Design (2023)
 
