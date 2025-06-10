@@ -31,7 +31,7 @@ The device features autonomous and adaptive gripping capabilities using force an
 
 1. **Clone this repository**  
     ```bash
-    git clone <repository-url>
+    git clone https://github.com/AdzCoder/robot-gripper-arm.git
     ```
 
 2. **Open the project**  
