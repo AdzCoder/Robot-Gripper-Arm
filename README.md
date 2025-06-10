@@ -61,4 +61,4 @@ An electromechanical gripper arm prototype designed to assist individuals with l
 - ES2C6 Electromechanical System Design (2023)
 
 ## License
-MIT Licence
+MIT License - see LICENSE file
