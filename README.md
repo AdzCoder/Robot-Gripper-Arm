@@ -123,13 +123,6 @@ An electromechanical gripper arm prototype designed to assist individuals with l
 - Develop safety-critical control algorithms
 - Create accessible human-machine interfaces
 
-## Performance Metrics
-
-- ✅ **Grip Success Rate:** 94.2% across tested object range
-- ✅ **Response Time:** 85ms average sensor-to-action
-- ✅ **Power Efficiency:** 8.5W average consumption
-- ✅ **Safety Tests:** 100% emergency release functionality
-
 ## Future Enhancements
 
 Potential improvements identified during development:
